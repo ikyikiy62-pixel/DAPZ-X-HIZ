@@ -1,5 +1,5 @@
 {
-  "name": "promptforge",
+  "name": "chat-web",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.57.0",
     "js-tiktoken": "^1.0.20",
     "next": "^15.5.0",
     "react": "^19.1.0",
