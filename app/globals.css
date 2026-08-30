@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #050505;
+  --paper: #f3f3f0;
+  --yellow: #ffe45c;
+  --mint: #9ff3c8;
+  --orange: #ffb067;
+  --white: #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button, input, textarea, select { font: inherit; }
+
+::selection {
+  background: var(--ink);
+  color: var(--yellow);
+}
+
+.neo-control {
+  border: 4px solid #000;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 0 #000;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+
+.neo-control:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 0 #000;
+}
+
+textarea:focus, input:focus, select:focus, button:focus-visible {
+  outline: 4px solid #000;
+  outline-offset: 3px;
+}
+
+.grid-paper {
+  background-image: linear-gradient(#d5d5d0 1px, transparent 1px), linear-gradient(90deg, #d5d5d0 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.prose-output p { margin: 0 0 1rem; }
+.prose-output h1, .prose-output h2, .prose-output h3 { font-weight: 900; margin: 1.25rem 0 .65rem; }
+.prose-output ul { margin: .5rem 0 1rem 1.25rem; list-style: square; }
+.prose-output code { background: #000; color: #fff; padding: .1rem .3rem; }
