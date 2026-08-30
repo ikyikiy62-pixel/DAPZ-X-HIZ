@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "../lib/supabase-browser";
 
@@ -177,7 +178,7 @@ export default function Home() {
     if (error) { setText(body); setMessage(error.message); }
   }
 
-  async function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  async function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); await sendMessage(); }
   }
 
