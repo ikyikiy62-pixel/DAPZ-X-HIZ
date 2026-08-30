@@ -5,11 +5,27 @@ import type { KeyboardEvent } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "../lib/supabase-browser";
 
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (options: { client_id: string; callback: (response: { credential: string }) => void; auto_select?: boolean }) => void;
+          renderButton: (element: HTMLElement, options: { type?: string; theme?: string; size?: string; width?: number; text?: string; shape?: string }) => void;
+          prompt: () => void;
+          cancel: () => void;
+        };
+      };
+    };
+  }
+}
+
 type Profile = { id: string; username: string; display_name: string | null; avatar_url: string | null };
 type Conversation = { id: string; user_a: string; user_b: string; created_at: string; other?: Profile; lastMessage?: string; lastAt?: string };
 type Message = { id: string; conversation_id: string; sender_id: string; body: string; created_at: string };
 
 const sb = () => createSupabaseBrowserClient();
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
 function Logo({ small = false }: { small?: boolean }) {
   return <div className={`grid shrink-0 place-items-center rounded-full bg-[#075e54] text-white ${small ? "h-9 w-9" : "h-11 w-11"}`} aria-label="Nametag">
@@ -39,6 +55,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [mobileChat, setMobileChat] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -93,12 +110,34 @@ export default function Home() {
 
   useEffect(() => { requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })); }, [messages.length, selected?.id]);
 
-  async function login() {
-    setError("");
-    const redirectTo = `${window.location.origin}/auth/callback?next=/`;
-    const { error: e } = await sb().auth.signInWithOAuth({ provider: "google", options: { redirectTo } });
-    if (e) setError(e.message);
-  }
+  useEffect(() => {
+    if (user || !GOOGLE_CLIENT_ID || !googleButtonRef.current) return;
+    let cancelled = false;
+    const mountGoogle = () => {
+      if (cancelled || !window.google || !googleButtonRef.current) return;
+      googleButtonRef.current.innerHTML = "";
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: async ({ credential }) => {
+          setBusy(true); setError("");
+          const { error: e } = await sb().auth.signInWithIdToken({ provider: "google", token: credential });
+          setBusy(false);
+          if (e) setError(e.message);
+        },
+      });
+      window.google.accounts.id.renderButton(googleButtonRef.current, { type: "standard", theme: "outline", size: "large", width: 360, text: "continue_with", shape: "rectangular" });
+    };
+    if (window.google) mountGoogle();
+    else {
+      const script = document.createElement("script");
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.defer = true;
+      script.onload = mountGoogle;
+      document.head.appendChild(script);
+    }
+    return () => { cancelled = true; window.google?.accounts.id.cancel(); };
+  }, [user]);
 
   async function logout() { await sb().auth.signOut(); setMobileChat(false); }
 
@@ -168,7 +207,7 @@ export default function Home() {
 
   if (loading) return <main className="grid min-h-[100dvh] place-items-center bg-[#efeae2] text-[#111b21]"><div className="text-center"><Logo /><p className="mt-3 text-sm font-semibold">Memuat Nametag...</p></div></main>;
 
-  if (!user) return <main className="grid min-h-[100dvh] place-items-center bg-[#efeae2] p-5 text-[#111b21]"><section className="w-full max-w-lg rounded-2xl bg-white p-7 shadow-xl md:p-10"><div className="flex items-center gap-3"><Logo /><div><h1 className="text-2xl font-bold">Nametag</h1><p className="text-sm text-gray-500">Private messaging, without phone numbers.</p></div></div><h2 className="mt-10 text-4xl font-bold tracking-tight">Chat lebih simpel.</h2><p className="mt-4 leading-7 text-[#667781]">Temukan teman dengan nametag dan kirim pesan secara realtime.</p><button onClick={login} className="mt-8 flex min-h-12 w-full items-center justify-center gap-3 rounded-xl border border-[#d1d7db] bg-white px-5 py-3 font-semibold shadow-sm active:scale-[.99]">Continue with Google</button>{error && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}</section></main>;
+  if (!user) return <main className="grid min-h-[100dvh] place-items-center bg-[#efeae2] p-5 text-[#111b21]"><section className="w-full max-w-lg rounded-2xl bg-white p-7 shadow-xl md:p-10"><div className="flex items-center gap-3"><Logo /><div><h1 className="text-2xl font-bold">Nametag</h1><p className="text-sm text-gray-500">Private messaging, without phone numbers.</p></div></div><h2 className="mt-10 text-4xl font-bold tracking-tight">Chat lebih simpel.</h2><p className="mt-4 leading-7 text-[#667781]">Temukan teman dengan nametag dan kirim pesan secara realtime.</p>{GOOGLE_CLIENT_ID ? <div className="mt-8 flex min-h-12 w-full justify-center"><div ref={googleButtonRef} /></div> : <p className="mt-8 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Google Login belum dikonfigurasi. Tambahkan NEXT_PUBLIC_GOOGLE_CLIENT_ID di environment Vercel.</p>}{busy && <p className="mt-3 text-center text-sm text-[#667781]">Memproses login...</p>}{error && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}</section></main>;
 
   const chatName = selected?.other?.display_name || selected?.other?.username || "Pilih chat";
 
@@ -177,18 +216,14 @@ export default function Home() {
       <aside className={`${mobileChat ? "hidden md:flex" : "flex"} h-full w-full shrink-0 flex-col border-r border-[#d9dee0] md:w-[390px]`}>
         <header className="flex h-16 shrink-0 items-center justify-between bg-[#f0f2f5] px-4"><div className="flex min-w-0 items-center gap-3"><Logo small /><div className="min-w-0"><p className="truncate font-bold">Nametag</p><p className="truncate text-xs text-[#667781]">@{profile?.username}</p></div></div><button onClick={() => setShowProfile(true)} className="rounded-full p-1" aria-label="Profil"><Avatar profile={profile} size="sm" /></button></header>
         <div className="shrink-0 border-b border-[#e5e7e9] bg-white p-3"><div className="flex items-center gap-2 rounded-lg bg-[#f0f2f5] px-3"><svg viewBox="0 0 24 24" className="h-5 w-5 text-[#667781]" fill="none"><circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="2"/><path d="m16 16 4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg><input value={search} onChange={e => searchUsers(e.target.value)} placeholder="Cari dengan @nametag" className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none" /></div>{results.length > 0 && <div className="mt-2 overflow-hidden rounded-xl border border-[#e0e4e6] bg-white shadow-lg">{results.map(person => <button key={person.id} onClick={() => startChat(person)} className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-[#f5f6f6]"><Avatar profile={person} size="sm" /><span className="min-w-0"><span className="block truncate font-semibold">{person.display_name || `@${person.username}`}</span><span className="block truncate text-xs text-[#667781]">@{person.username}</span></span></button>)}</div>}</div>
-        <div className="min-h-0 flex-1 overflow-y-auto">{conversations.length === 0 ? <div className="px-6 py-14 text-center"><p className="font-semibold">Belum ada chat</p><p className="mt-1 text-sm text-[#667781]">Cari @nametag teman untuk memulai percakapan.</p></div> : conversations.map(c => <button key={c.id} onClick={() => { setSelected(c); setMobileChat(true); }} className={`flex w-full items-center gap-3 border-b border-[#f0f2f2] px-4 py-3 text-left ${selected?.id === c.id ? "bg-[#f0f2f5]" : "bg-white hover:bg-[#f7f8f8]"}`}><Avatar profile={c.other} /><span className="min-w-0 flex-1"><span className="block truncate font-semibold">{c.other?.display_name || `@${c.other?.username}`}</span><span className="block truncate text-sm text-[#667781]">{c.lastMessage || `@${c.other?.username}`}</span></span>{c.lastAt && <time className="self-start pt-1 text-[11px] text-[#667781]">{new Date(c.lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>}</button>)}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{conversations.length === 0 ? <div className="grid h-full place-items-center px-8 text-center text-sm text-[#667781]"><div><p className="font-semibold text-[#3b4a54]">Belum ada percakapan</p><p className="mt-1">Cari teman menggunakan @nametag untuk memulai chat.</p></div></div> : conversations.map(c => <button key={c.id} onClick={() => { setSelected(c); setMobileChat(true); }} className={`flex w-full items-center gap-3 border-b border-[#f0f2f5] px-4 py-3 text-left hover:bg-[#f5f6f6] ${selected?.id === c.id ? "bg-[#f0f2f5]" : "bg-white"}`}><Avatar profile={c.other} size="md" /><span className="min-w-0 flex-1"><span className="block truncate font-semibold">{c.other?.display_name || `@${c.other?.username || "user"}`}</span><span className="mt-0.5 block truncate text-sm text-[#667781]">{c.lastMessage || "Mulai percakapan"}</span></span>{c.lastAt && <time className="self-start pt-1 text-[11px] text-[#667781]">{new Date(c.lastAt).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</time>}</button>)}</div>
       </aside>
-
-      <section className={`${mobileChat ? "flex" : "hidden md:flex"} h-full min-w-0 flex-1 flex-col`}>
-        {selected ? <>
-          <header className="flex h-16 shrink-0 items-center gap-3 border-b border-[#d9dee0] bg-[#f0f2f5] px-3"><button onClick={() => setMobileChat(false)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full hover:bg-[#e2e5e7] md:hidden" aria-label="Kembali"><svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg></button><Avatar profile={selected.other} /><div className="min-w-0"><p className="truncate font-semibold">{chatName}</p><p className="truncate text-xs text-[#667781]">@{selected.other?.username}</p></div></header>
-          <div className="min-h-0 flex-1 overflow-y-auto bg-[#efeae2] px-3 py-4 md:px-8" style={{ backgroundImage: "radial-gradient(#d8d0c5 1px, transparent 1px)", backgroundSize: "20px 20px" }}><div className="mx-auto flex w-full max-w-3xl flex-col gap-1">{messages.length === 0 ? <div className="mx-auto mt-8 rounded-lg bg-white/80 px-4 py-2 text-center text-xs text-[#667781] shadow-sm">Belum ada pesan. Kirim pesan pertama.</div> : messages.map(m => <div key={m.id} className={`flex ${m.sender_id === user.id ? "justify-end" : "justify-start"}`}><div className={`max-w-[82%] rounded-2xl px-3 py-2 text-[15px] leading-5 shadow-sm md:max-w-[65%] ${m.sender_id === user.id ? "rounded-br-md bg-[#d9fdd3]" : "rounded-bl-md bg-white"}`}><p className="whitespace-pre-wrap break-words">{m.body}</p><time className="mt-1 block text-right text-[10px] text-[#667781]">{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div></div>)}<div ref={bottomRef} className="h-px shrink-0" /></div></div>
-          <form onSubmit={e => { e.preventDefault(); void sendMessage(); }} className="shrink-0 border-t border-[#d9dee0] bg-[#f0f2f5] px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:px-4"><div className="mx-auto flex max-w-3xl items-end gap-2"><textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={handleKeyDown} rows={1} placeholder="Ketik pesan" className="max-h-28 min-h-11 flex-1 resize-none rounded-2xl border-0 bg-white px-4 py-3 text-[15px] leading-5 outline-none focus:ring-0"/><button type="submit" disabled={!text.trim() || busy} className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#075e54] text-white disabled:opacity-40" aria-label="Kirim"><svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><path d="M4 4.5 20 12 4 19.5l2.5-6.2L15 12l-8.5-1.3z" fill="currentColor"/></svg></button></div>{error && <p className="mx-auto mt-1 max-w-3xl truncate px-2 text-xs text-red-600">{error}</p>}</form>
-        </> : <div className="grid h-full place-items-center bg-[#efeae2] px-6 text-center"><div><Logo /><h2 className="mt-4 text-xl font-bold">Pilih percakapan</h2><p className="mt-1 text-sm text-[#667781]">Cari teman menggunakan @nametag untuk mulai chat.</p></div></div>}
+      <section className={`${mobileChat ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col bg-[#efeae2]`}>
+        <header className="flex h-16 shrink-0 items-center gap-3 border-b border-[#d9dee0] bg-[#f0f2f5] px-3 md:px-5">{selected ? <><button onClick={() => setMobileChat(false)} className="grid h-10 w-10 place-items-center rounded-full hover:bg-[#e2e6e8] md:hidden" aria-label="Kembali"><svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg></button><Avatar profile={selected.other} size="sm" /><div className="min-w-0"><p className="truncate font-semibold">{chatName}</p><p className="truncate text-xs text-[#667781]">@{selected.other?.username}</p></div></> : <p className="font-semibold text-[#667781]">Pilih percakapan</p>}</header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-8">{selected ? messages.map(m => <div key={m.id} className={`mb-2 flex ${m.sender_id === user.id ? "justify-end" : "justify-start"}`}><div className={`max-w-[82%] rounded-lg px-3 py-2 text-[15px] shadow-sm md:max-w-[65%] ${m.sender_id === user.id ? "bg-[#d9fdd3]" : "bg-white"}`}><p className="whitespace-pre-wrap break-words">{m.body}</p><p className="mt-1 text-right text-[10px] text-[#667781]">{new Date(m.created_at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</p></div></div>) : <div className="grid h-full place-items-center text-center text-[#667781]"><div><Logo /><p className="mt-4 font-semibold">Pilih chat untuk mulai mengirim pesan</p></div></div>}<div ref={bottomRef} /></div>
+        {selected && <div className="shrink-0 bg-[#f0f2f5] px-2 py-2 pb-[max(8px,env(safe-area-inset-bottom))] md:px-4"><div className="mx-auto flex max-w-5xl items-end gap-2"><textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={handleKeyDown} rows={1} placeholder="Ketik pesan" className="max-h-32 min-h-11 flex-1 resize-none rounded-xl border-0 bg-white px-4 py-3 text-[15px] leading-5 outline-none focus:ring-0" /><button onClick={sendMessage} disabled={!text.trim() || busy} className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#075e54] text-white disabled:opacity-40" aria-label="Kirim"><svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><path d="M4 4.5 20 12 4 19.5l2.2-6.2L15 12l-8.8-1.3z" fill="currentColor"/></svg></button></div></div>}
       </section>
     </div>
-
-    {showProfile && <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"><section className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-center justify-between"><h2 className="text-xl font-bold">Profil</h2><button onClick={() => setShowProfile(false)} className="text-2xl leading-none text-[#667781]" aria-label="Tutup">×</button></div><div className="mt-6 flex flex-col items-center"><button onClick={() => fileRef.current?.click()} className="relative" aria-label="Ganti foto profil"><Avatar profile={profile} size="lg" /><span className="absolute bottom-0 right-0 rounded-full bg-[#075e54] px-2 py-1 text-xs font-semibold text-white">Ubah</span></button><input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) void uploadAvatar(file); e.currentTarget.value = ""; }} /></div><label className="mt-6 block text-sm font-semibold">Nametag<input value={username} onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0,24))} className="mt-1 h-11 w-full rounded-lg border border-[#d1d7db] px-3 outline-none focus:border-[#075e54]" /></label><label className="mt-4 block text-sm font-semibold">Nama tampilan<input value={displayName} onChange={e => setDisplayName(e.target.value.slice(0,40))} className="mt-1 h-11 w-full rounded-lg border border-[#d1d7db] px-3 outline-none focus:border-[#075e54]" /></label><button disabled={busy} onClick={() => void saveProfile()} className="mt-5 h-11 w-full rounded-lg bg-[#075e54] font-semibold text-white disabled:opacity-50">Simpan profil</button><button onClick={() => void logout()} className="mt-2 h-11 w-full rounded-lg border border-[#d1d7db] font-semibold text-red-600">Keluar</button>{error && <p className="mt-3 text-sm text-red-600">{error}</p>}</section></div>}
+    {showProfile && <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-center justify-between"><h2 className="text-xl font-bold">Profil</h2><button onClick={() => setShowProfile(false)} className="text-sm text-[#667781]">Tutup</button></div><div className="mt-6 flex flex-col items-center"><button onClick={() => fileRef.current?.click()} className="relative rounded-full" disabled={busy}><Avatar profile={profile} size="lg" /><span className="absolute bottom-0 right-0 rounded-full bg-[#075e54] px-2 py-1 text-[10px] font-bold text-white">Ubah</span></button><input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f=e.target.files?.[0]; if(f) uploadAvatar(f); e.currentTarget.value=""; }} /></div><label className="mt-6 block text-sm font-semibold">Nametag<input value={username} onChange={e => setUsername(e.target.value.toLowerCase())} className="mt-1 h-11 w-full rounded-lg border border-[#d9dee0] px-3 outline-none focus:border-[#075e54]" /></label><label className="mt-4 block text-sm font-semibold">Nama tampilan<input value={displayName} onChange={e => setDisplayName(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-[#d9dee0] px-3 outline-none focus:border-[#075e54]" /></label>{error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}<div className="mt-6 flex gap-2"><button onClick={saveProfile} disabled={busy} className="flex-1 rounded-lg bg-[#075e54] px-4 py-3 font-semibold text-white disabled:opacity-50">Simpan</button><button onClick={logout} className="rounded-lg border border-red-200 px-4 py-3 font-semibold text-red-600">Keluar</button></div></div></div>}
   </main>;
 }
