@@ -29,10 +29,7 @@ export async function POST(request: Request) {
     if (model === 'gpt-4o') {
       const encoding = encodingForModel('gpt-4o');
       tokens = encoding.encode(text).length;
-      encoding.free();
     } else {
-      // Claude does not use OpenAI's tiktoken vocabulary. This is a transparent
-      // estimate using the common ~4 characters/token heuristic, not an exact count.
       tokens = Math.max(1, Math.ceil(text.length / 4));
       note = 'Claude count is an estimate; exact Claude tokenization is model-specific.';
     }
